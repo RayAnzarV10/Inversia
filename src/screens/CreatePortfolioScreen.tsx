@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
 import { RootStackParamList } from '../types/navigationTypes';
 import { usePortfolioContext } from 'contexts/PortfolioContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Definir las monedas disponibles
 const MONEDAS_DISPONIBLES = [
@@ -38,7 +39,7 @@ const CreatePortfolioScreen: React.FC = () => {
   // Estado para el botón principal
   const [isLoading, setIsLoading] = useState(false);
   
-  const { triggerPortfolioRefetch } = usePortfolioContext();
+  const { triggerPortfolioRefetch, setNewPortfolioId } = usePortfolioContext();
 
   useFocusEffect(
     React.useCallback(() => {
@@ -75,13 +76,12 @@ const CreatePortfolioScreen: React.FC = () => {
     try {
       setIsLoading(true);
       
-      // Obtener el usuario actual de Supabase (si estás usando autenticación)
+      // Obtener el usuario actual de Supabase
       const { data: { user } } = await supabase.auth.getUser();
       
       // Si no hay usuario autenticado, usar el ID fijo para desarrollo
-      const currentUserId = user?.id
+      const currentUserId = user?.id || '911ff320-828d-4e2e-a01c-c8216aa0b5a3';
       
-      // Crear el portafolio en la base de datos
       const { data, error } = await supabase
         .from('portafolios')
         .insert([
@@ -100,8 +100,13 @@ const CreatePortfolioScreen: React.FC = () => {
         throw error;
       }
       
-      triggerPortfolioRefetch();
-
+      // NUEVO: Guardar el ID del portafolio recién creado en AsyncStorage
+      if (data && data.length > 0) {
+        const newPortfolioId = data[0].id;
+        await AsyncStorage.setItem('lastCreatedPortfolioId', newPortfolioId);
+        console.log('Portfolio ID guardado en AsyncStorage:', newPortfolioId);
+      }
+      
       // Mostramos un mensaje de éxito
       Alert.alert(
         'Portafolio Creado',
@@ -109,6 +114,7 @@ const CreatePortfolioScreen: React.FC = () => {
         [{ 
           text: 'OK',
           onPress: () => {
+            // Simplemente regresamos a la pantalla anterior
             navigation.goBack();
           }
         }]

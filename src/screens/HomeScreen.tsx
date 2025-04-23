@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
 import { RootStackParamList } from '../types/navigationTypes';
 import { usePortfolioContext } from 'contexts/PortfolioContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Definir interfaces basadas en la estructura de nuestra base de datos
 interface Portafolio {
@@ -56,12 +57,18 @@ const HomeScreen: React.FC = () => {
   
   const [portfolioMenuVisible, setPortfolioMenuVisible] = useState(false);
   const [currentPortfolio, setCurrentPortfolio] = useState<Portafolio | null>(null);
-  const { shouldRefetchPortfolios, resetPortfolioRefetch } = usePortfolioContext();
+  const { 
+    shouldRefetchPortfolios, 
+    resetPortfolioRefetch,
+    newPortfolioId,
+    setNewPortfolioId, 
+  } = usePortfolioContext();
 
-  // Cargar lista de portafolios al inicio
-  useEffect(() => {
-    fetchPortafolios();
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchPortafolios();
+    }, [])
+  )
 
   useEffect(() => {
     if (shouldRefetchPortfolios) {
@@ -110,11 +117,12 @@ const HomeScreen: React.FC = () => {
     try {
       setLoading(true);
       
+      // Obtener el usuario actual de Supabase
       const { data: { user } } = await supabase.auth.getUser();
       
       // Si no hay usuario autenticado, usar el ID fijo para desarrollo
-      const currentUserId = user?.id
-
+      const currentUserId = user?.id;
+      
       const { data, error } = await supabase
         .from('portafolios')
         .select('*')
@@ -124,12 +132,36 @@ const HomeScreen: React.FC = () => {
       if (error) {
         throw error;
       }
-            
+      
       if (data && data.length > 0) {
         setPortafolios(data);
-        // Seleccionar el primer portafolio por defecto o el principal si existe
-        const portafolioPrincipal = data.find(p => p.es_portafolio_principal) || data[0];
-        setCurrentPortfolio(portafolioPrincipal);
+        
+        // NUEVO: Buscar si hay un ID guardado en AsyncStorage
+        const lastCreatedId = await AsyncStorage.getItem('lastCreatedPortfolioId');
+        console.log('Obtenido de AsyncStorage:', lastCreatedId);
+        
+        if (lastCreatedId) {
+          // Buscar el portafolio en los datos cargados
+          const newPortfolio = data.find(p => p.id === lastCreatedId);
+          
+          if (newPortfolio) {
+            console.log('Seleccionando portafolio recién creado:', newPortfolio.nombre);
+            // Si lo encontramos, seleccionarlo
+            setCurrentPortfolio(newPortfolio);
+            // Limpiamos el AsyncStorage para la próxima vez
+            await AsyncStorage.removeItem('lastCreatedPortfolioId');
+          } else {
+            console.log('No se encontró el portafolio con ID:', lastCreatedId);
+            // Si no existe, seleccionar por defecto
+            const defaultPortfolio = data.find(p => p.es_portafolio_principal) || data[0];
+            setCurrentPortfolio(defaultPortfolio);
+          }
+        } else {
+          console.log('No hay lastCreatedPortfolioId en AsyncStorage');
+          // Comportamiento por defecto
+          const defaultPortfolio = data.find(p => p.es_portafolio_principal) || data[0];
+          setCurrentPortfolio(defaultPortfolio);
+        }
       } else {
         console.log('No se encontraron portafolios');
         setError('No hay portafolios disponibles. ¿Quieres crear uno nuevo?');
