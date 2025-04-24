@@ -10,7 +10,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  StatusBar
+  StatusBar,
+  Switch,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,6 +36,8 @@ const CreatePortfolioScreen: React.FC = () => {
   const [descripcion, setDescripcion] = useState('');
   const [monedaBase, setMonedaBase] = useState('USD');
   const [monedasMenuVisible, setMonedasMenuVisible] = useState(false);
+  const [esPortafolioPrincipal, setEsPortafolioPrincipal] = useState(false);
+  const [isFirstPortfolio, setIsFirstPortfolio] = useState(false);
   
   // Estado para el botón principal
   const [isLoading, setIsLoading] = useState(false);
@@ -49,12 +52,48 @@ const CreatePortfolioScreen: React.FC = () => {
       setMonedaBase('USD'); // O el valor predeterminado que prefieras
       setMonedasMenuVisible(false);
       setIsLoading(false);
+      setEsPortafolioPrincipal(false);
+      
+      // Verificar si es el primer portafolio del usuario
+      checkIfFirstPortfolio();
       
       return () => {
         // Si necesitas realizar alguna limpieza cuando la pantalla pierde el foco
       };
     }, [])
   );
+
+  // Verificar si el usuario ya tiene portafolios
+  const checkIfFirstPortfolio = async () => {
+    try {
+      // Obtener el usuario actual de Supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Si no hay usuario autenticado, usar el ID fijo para desarrollo
+      const currentUserId = user?.id || '911ff320-828d-4e2e-a01c-c8216aa0b5a3';
+      
+      // Consultar los portafolios existentes del usuario
+      const { data, error, count } = await supabase
+        .from('portafolios')
+        .select('*', { count: 'exact' })
+        .eq('usuario_id', currentUserId);
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Si no hay portafolios, este será el primero
+      if (count === 0) {
+        setIsFirstPortfolio(true);
+        setEsPortafolioPrincipal(true); // El primer portafolio debe ser principal
+      } else {
+        setIsFirstPortfolio(false);
+      }
+      
+    } catch (error: any) {
+      console.error('Error al verificar portafolios:', error.message);
+    }
+  };
 
   // Generar ID para el usuario (temporal, en un caso real deberías usar auth)
   const handleMonedasMenuToggle = () => {
@@ -82,6 +121,20 @@ const CreatePortfolioScreen: React.FC = () => {
       // Si no hay usuario autenticado, usar el ID fijo para desarrollo
       const currentUserId = user?.id || '911ff320-828d-4e2e-a01c-c8216aa0b5a3';
       
+      // Si este portafolio será el principal, actualizar todos los existentes a false
+      if (esPortafolioPrincipal && !isFirstPortfolio) {
+        const { error: updateError } = await supabase
+          .from('portafolios')
+          .update({ es_portafolio_principal: false })
+          .eq('usuario_id', currentUserId);
+          
+        if (updateError) {
+          console.error('Error al actualizar portafolios existentes:', updateError);
+          // Continuar aunque haya error, pero registrarlo
+        }
+      }
+      
+      // Crear el nuevo portafolio
       const { data, error } = await supabase
         .from('portafolios')
         .insert([
@@ -89,7 +142,7 @@ const CreatePortfolioScreen: React.FC = () => {
             nombre: nombre.trim(),
             descripcion: descripcion.trim() || null,
             moneda_base: monedaBase,
-            es_portafolio_principal: true,
+            es_portafolio_principal: isFirstPortfolio ? true : esPortafolioPrincipal,
             estatus: 'Activo',
             usuario_id: currentUserId
           }
@@ -165,7 +218,7 @@ const CreatePortfolioScreen: React.FC = () => {
           
           {/* Texto instructivo */}
           <Text style={styles.instructionText}>
-            Crea tu primer portafolio para comenzar a rastrear tus inversiones. Puedes añadir activos una vez creado.
+            Crea tu {isFirstPortfolio ? 'primer' : 'nuevo'} portafolio para comenzar a rastrear tus inversiones. Puedes añadir activos una vez creado.
           </Text>
           
           {/* Formulario */}
@@ -243,6 +296,35 @@ const CreatePortfolioScreen: React.FC = () => {
                 </View>
               )}
             </View>
+            
+            {/* Opción: Portafolio Principal */}
+            {!isFirstPortfolio && (
+              <View style={styles.switchContainer}>
+                <View style={styles.switchTextContainer}>
+                  <Text style={styles.switchTitle}>Establecer como portafolio principal</Text>
+                  <Text style={styles.switchDescription}>
+                    Si activas esta opción, este portafolio se convertirá en tu portafolio principal
+                  </Text>
+                </View>
+                <Switch
+                  trackColor={{ false: "#333", true: "#4CD964" }}
+                  thumbColor={esPortafolioPrincipal ? "#fff" : "#f4f3f4"}
+                  ios_backgroundColor="#333"
+                  onValueChange={setEsPortafolioPrincipal}
+                  value={esPortafolioPrincipal}
+                />
+              </View>
+            )}
+            
+            {/* Mensaje para primer portafolio */}
+            {isFirstPortfolio && (
+              <View style={styles.firstPortfolioMessage}>
+                <Ionicons name="information-circle-outline" size={20} color="#4CD964" style={styles.infoIcon} />
+                <Text style={styles.infoText}>
+                  Este será tu portafolio principal ya que es el primero que creas.
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -418,6 +500,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+    marginBottom: 20,
+  },
+  switchTextContainer: {
+    flex: 1,
+    marginRight: 16
+  },
+  switchTitle: {
+    fontSize: 16,
+    color: 'white',
+    marginBottom: 4,
+  },
+  switchDescription: {
+    fontSize: 14,
+    color: '#999',
+  },
+  firstPortfolioMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 217, 100, 0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(76, 217, 100, 0.3)',
+    marginBottom: 20,
+  },
+  infoIcon: {
+    marginRight: 8,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#4CD964',
+  }
 });
 
 export default CreatePortfolioScreen;

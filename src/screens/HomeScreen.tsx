@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -64,58 +64,48 @@ const HomeScreen: React.FC = () => {
     setNewPortfolioId, 
   } = usePortfolioContext();
 
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchPortafolios();
-    }, [])
-  )
-
-  useEffect(() => {
-    if (shouldRefetchPortfolios) {
-      // Limpiar cualquier error previo
-      setError(null);
-      
-      // Recargar los portafolios
-      fetchPortafolios();
-      
-      // Resetear la bandera para evitar múltiples llamadas
-      resetPortfolioRefetch();
-    }
-  }, [shouldRefetchPortfolios]);
-
-  // Recargar datos de activos cada vez que cambie el portafolio seleccionado
-  useEffect(() => {
-    if (currentPortfolio) {
-      fetchActivosPortafolio(currentPortfolio.id);
-    }
-  }, [currentPortfolio]);
-
-  // Recargar activos cada vez que la pantalla obtiene el foco
-  useFocusEffect(
-    React.useCallback(() => {
-      setError(null);
-      // fetchPortafolios();
-      if (currentPortfolio) {
-        fetchActivosPortafolio(currentPortfolio.id);
-      }
-    }, []) // Sin dependencias para que se ejecute cada vez que la pantalla obtiene el foco
-  );
-
-  const handlePortfolioMenuOpen = () => {
-    setPortfolioMenuVisible(true);
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    if (currentPortfolio) {
-      await fetchActivosPortafolio(currentPortfolio.id);
-    }
-    setRefreshing(false);
-  };
-
-  const fetchPortafolios = async () => {
+  // Declaramos fetchActivosPortafolio fuera para poder usarla en varios lugares
+  const fetchActivosPortafolio = useCallback(async (portfolioId: string) => {
+    if (!portfolioId) return;
+    
     try {
       setLoading(true);
+      
+      const { data, error } = await supabase
+        .from('activos_portafolio')
+        .select('*')
+        .eq('portafolio_id', portfolioId);
+      
+      if (error) {
+        throw error;
+      }
+      
+      if (data) {
+        // Aquí simularemos datos que vendrían del proveedor externo
+        // En una implementación real, consultarías a tu proveedor financiero
+        const activosConPrecios = data.map(activo => ({
+          ...activo,
+          precio_actual: Math.random() * 1000 + 10,
+          cambio_valor: (Math.random() * 20) - 10,
+          cambio_porcentaje: (Math.random() * 10) - 5,
+          valor_total: activo.cantidad * (Math.random() * 1000 + 10)
+        }));
+        
+        setActivos(activosConPrecios);
+      }
+    } catch (error: any) {
+      console.error('Error al cargar activos del portafolio:', error.message);
+      setError('No se pudieron cargar los activos. Por favor, inténtalo de nuevo más tarde.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Función para cargar portafolios
+  const fetchPortafolios = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
       
       // Obtener el usuario actual de Supabase
       const { data: { user } } = await supabase.auth.getUser();
@@ -172,40 +162,62 @@ const HomeScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Este useEffect maneja la carga inicial y las refetchs
+  useEffect(() => {
+    // Esta bandera nos ayuda a evitar múltiples cargas
+    let isMounted = true;
+
+    const initialLoad = async () => {
+      if (isMounted) {
+        await fetchPortafolios();
+      }
+    };
+
+    initialLoad();
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Solo se ejecuta una vez al montar el componente
+
+  // Este useEffect se encarga de recargar cuando shouldRefetchPortfolios cambia
+  useEffect(() => {
+    if (shouldRefetchPortfolios) {
+      fetchPortafolios();
+      resetPortfolioRefetch();
+    }
+  }, [shouldRefetchPortfolios, fetchPortafolios, resetPortfolioRefetch]);
+
+  // Este useEffect carga los activos cuando cambia el portafolio
+  useEffect(() => {
+    if (currentPortfolio?.id) {
+      fetchActivosPortafolio(currentPortfolio.id);
+    }
+  }, [currentPortfolio, fetchActivosPortafolio]);
+
+  // useFocusEffect para recargar solo los activos (no el portafolio completo)
+  useFocusEffect(
+    useCallback(() => {
+      if (currentPortfolio?.id) {
+        fetchActivosPortafolio(currentPortfolio.id);
+      }
+      return () => {};
+    }, [currentPortfolio, fetchActivosPortafolio])
+  );
+
+  const handlePortfolioMenuOpen = () => {
+    setPortfolioMenuVisible(true);
   };
 
-  const fetchActivosPortafolio = async (portfolioId: string) => {
-    try {
-      setLoading(true);
-      
-      const { data, error } = await supabase
-        .from('activos_portafolio')
-        .select('*')
-        .eq('portafolio_id', portfolioId);
-      
-      if (error) {
-        throw error;
-      }
-      
-      if (data) {
-        // Aquí simularemos datos que vendrían del proveedor externo
-        // En una implementación real, consultarías a tu proveedor financiero
-        const activosConPrecios = data.map(activo => ({
-          ...activo,
-          precio_actual: Math.random() * 1000 + 10,
-          cambio_valor: (Math.random() * 20) - 10,
-          cambio_porcentaje: (Math.random() * 10) - 5,
-          valor_total: activo.cantidad * (Math.random() * 1000 + 10)
-        }));
-        
-        setActivos(activosConPrecios);
-      }
-    } catch (error: any) {
-      console.error('Error al cargar activos del portafolio:', error.message);
-      setError('No se pudieron cargar los activos. Por favor, inténtalo de nuevo más tarde.');
-    } finally {
-      setLoading(false);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (currentPortfolio) {
+      await fetchActivosPortafolio(currentPortfolio.id);
     }
+    setRefreshing(false);
   };
   
   const handleDeleteActivo = (activo: ActivoPortafolio) => {
